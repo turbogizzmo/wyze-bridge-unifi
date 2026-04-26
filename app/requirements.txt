@@ -5,7 +5,7 @@ pydantic==2.9.*
 python-dotenv==1.0.*
 requests==2.32.*
 PyYAML==6.0.*
-xxtea==3.3.*
+xxtea==3.8.*
 spyne==2.14.*
 lxml==5.3.*
 netifaces==0.11.*
