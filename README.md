@@ -41,7 +41,7 @@ width, height = (640, 480) if bitrate < 500 else (1280, 720)
 ### ONVIF `GetStreamUri` credential embedding (`app/wyzebridge/onvif_server.py`)
 The ONVIF spec requires the stream URI to include credentials when authentication is needed. The `GetStreamUri` response now reads `STREAM_AUTH` and embeds the first credential pair in the RTSP URL:
 ```
-rtsp://wyze:wyze@172.16.4.121:8554/driveway
+rtsp://wyze:wyze@192.168.1.x:8554/driveway
 ```
 This is what allows UniFi Protect to authenticate after adopting a camera via Advanced Adoption.
 
