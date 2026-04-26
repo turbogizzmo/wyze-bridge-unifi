@@ -1,0 +1,56 @@
+ONVIF Merge Report
+==================
+Main zip:  docker-wyze-bridge-main.zip
+ONVIF zip: wyze-bridge-onvif-main.zip
+Output:    out-dwb-onvif
+
+Changed/added files under app/:
+Only in /tmp/tmp.JNZviRBQvE/app_main: .env
+Files /tmp/tmp.JNZviRBQvE/app_main/frontend.py and /tmp/tmp.JNZviRBQvE/app_onvif/frontend.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/requirements.txt and /tmp/tmp.JNZviRBQvE/app_onvif/requirements.txt differ
+Only in /tmp/tmp.JNZviRBQvE/app_main: run
+Files /tmp/tmp.JNZviRBQvE/app_main/static/bulma-toast.js and /tmp/tmp.JNZviRBQvE/app_onvif/static/bulma-toast.js differ
+Files /tmp/tmp.JNZviRBQvE/app_main/static/loading.svg and /tmp/tmp.JNZviRBQvE/app_onvif/static/loading.svg differ
+Files /tmp/tmp.JNZviRBQvE/app_main/static/notavailable.svg and /tmp/tmp.JNZviRBQvE/app_onvif/static/notavailable.svg differ
+Files /tmp/tmp.JNZviRBQvE/app_main/static/site.css and /tmp/tmp.JNZviRBQvE/app_onvif/static/site.css differ
+Files /tmp/tmp.JNZviRBQvE/app_main/static/site.js and /tmp/tmp.JNZviRBQvE/app_onvif/static/site.js differ
+Files /tmp/tmp.JNZviRBQvE/app_main/static/webrtc.js and /tmp/tmp.JNZviRBQvE/app_onvif/static/webrtc.js differ
+Files /tmp/tmp.JNZviRBQvE/app_main/templates/base.html and /tmp/tmp.JNZviRBQvE/app_onvif/templates/base.html differ
+Files /tmp/tmp.JNZviRBQvE/app_main/templates/index.html and /tmp/tmp.JNZviRBQvE/app_onvif/templates/index.html differ
+Files /tmp/tmp.JNZviRBQvE/app_main/templates/login.html and /tmp/tmp.JNZviRBQvE/app_onvif/templates/login.html differ
+Files /tmp/tmp.JNZviRBQvE/app_main/templates/m3u8.html and /tmp/tmp.JNZviRBQvE/app_onvif/templates/m3u8.html differ
+Files /tmp/tmp.JNZviRBQvE/app_main/templates/webrtc.html and /tmp/tmp.JNZviRBQvE/app_onvif/templates/webrtc.html differ
+Only in /tmp/tmp.JNZviRBQvE/app_main: threads.py
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/auth.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/auth.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/bridge_utils.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/bridge_utils.py differ
+Only in /tmp/tmp.JNZviRBQvE/app_main/wyzebridge: bridge_utils_sunset.py
+Only in /tmp/tmp.JNZviRBQvE/app_main/wyzebridge: build_config.py
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/config.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/config.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/ffmpeg.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/ffmpeg.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/hass.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/hass.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/logging.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/logging.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/mqtt.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/mqtt.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/mtx_event.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/mtx_event.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/mtx_server.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/mtx_server.py differ
+Only in /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge: onvif_ptz.py
+Only in /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge: onvif_server.py
+Only in /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge: spyne_patch.py
+Only in /tmp/tmp.JNZviRBQvE/app_main/wyzebridge: stream_manager.py
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/stream.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/stream.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/webhooks.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/webhooks.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/web_ui.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/web_ui.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/wyze_api.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/wyze_api.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/wyze_commands.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/wyze_commands.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/wyze_control.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/wyze_control.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/wyze_events.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/wyze_events.py differ
+Only in /tmp/tmp.JNZviRBQvE/app_main/wyzebridge: wyze_stream_options.py
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzebridge/wyze_stream.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzebridge/wyze_stream.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyze_bridge.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyze_bridge.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzecam/api_models.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzecam/api_models.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzecam/api.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzecam/api.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzecam/__init__.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzecam/__init__.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzecam/iotc.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzecam/iotc.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzecam/tutk/device_config.json and /tmp/tmp.JNZviRBQvE/app_onvif/wyzecam/tutk/device_config.json differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzecam/tutk/tutk_ioctl_mux.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzecam/tutk/tutk_ioctl_mux.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzecam/tutk/tutk_protocol.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzecam/tutk/tutk_protocol.py differ
+Files /tmp/tmp.JNZviRBQvE/app_main/wyzecam/tutk/tutk.py and /tmp/tmp.JNZviRBQvE/app_onvif/wyzecam/tutk/tutk.py differ

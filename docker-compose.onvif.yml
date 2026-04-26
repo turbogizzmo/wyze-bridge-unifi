@@ -1,0 +1,15 @@
+version: "3.8"
+services:
+  wyze-bridge:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        BUILD: "release"
+    container_name: wyze-bridge
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - FLASK_ENV=production
+    volumes:
+      - ./data:/data
