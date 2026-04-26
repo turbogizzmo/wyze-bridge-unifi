@@ -107,7 +107,7 @@ jobs:
           fi
 
       - name: Build and push a Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           builder: ${{ steps.buildx.outputs.name }}
           push: ${{ github.event_name != 'pull_request' }}
