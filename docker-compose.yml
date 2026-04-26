@@ -1,0 +1,30 @@
+services:
+  wyze-bridge:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        BUILD: release
+    image: wyze-bridge-onvif:local
+    container_name: wyze-bridge
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - WYZE_EMAIL=your@email.com
+      - WYZE_PASSWORD=yourpassword
+      - API_ID=your-api-id
+      - API_KEY=your-api-key
+      - WB_IP=192.168.1.x                # IP of the host running this container
+      - WB_AUTH=false
+      - QUALITY=sd30                     # use sd30 for Wyze Bulb Cam (HL_BC)
+      - ON_DEMAND=false
+      - FILTER_NAMES=driveway            # comma-separated camera names to bridge
+      - ONVIF_ENABLE=true
+      - ONVIF_PORT=8000
+      - ONVIF_DISCOVERY=true
+      - STREAM_AUTH=wyze:wyze            # credentials UniFi Protect uses for RTSP
+      - FLASK_ENV=production
+      - LOG_LEVEL=info
+    volumes:
+      - ./data:/data
+      - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
