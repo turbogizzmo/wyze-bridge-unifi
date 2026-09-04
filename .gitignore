@@ -1,5 +1,6 @@
 **/.DS_Store
 **/docker-compose.yml
+!go2rtc-kvs/docker-compose.yml
 **/mfa_token
 **/totp
 **/.vscode
@@ -16,3 +17,6 @@ test_env.list
 mediamtx.yml
 
 media/
+
+# Internal investigation log — contains local network details; keep out of the public repo
+docs/FW1161-RESEARCH.md
