@@ -15,6 +15,18 @@ Runs a Docker container on your network that:
 2. Re-publishes streams via RTSP (MediaMTX)
 3. Exposes an ONVIF server (port 8000) so UniFi Protect can discover and adopt cameras natively
 
+## ⚠️ Newer Wyze firmware broke TUTK? (`IOTC_ER_TIMEOUT`)
+
+Some Wyze firmware updates (e.g. Bulb Cam `HL_BC` **21.1.6.1161**, and various v3/v4
+builds) disable the local **TUTK** protocol this bridge relies on. The bridge then loops
+with `TUTK Error [-13] IOTC_ER_TIMEOUT` and never produces a stream, even though the
+camera works fine in the Wyze app.
+
+There's an additional, drop-in workaround that streams the camera over Wyze's
+WebRTC/Kinesis path (via **go2rtc**) into this bridge's existing MediaMTX/ONVIF pipeline —
+**no changes to the bridge itself**. See **[`go2rtc-kvs/`](go2rtc-kvs/)** for the deploy
+guide and ready-to-run compose stack.
+
 ## Fixes applied in this fork
 
 ### Python 3.12 pin (`docker/Dockerfile`)

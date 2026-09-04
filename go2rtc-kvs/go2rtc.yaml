@@ -1,0 +1,27 @@
+# go2rtc — ingest Wyze cameras over WebRTC / AWS Kinesis (KVS), bypassing TUTK.
+#
+# Use this when a Wyze firmware update has killed the bridge's local TUTK P2P
+# (symptom: repeating "TUTK Error [-13] IOTC_ER_TIMEOUT", stream never connects).
+# The camera still streams over Wyze's WebRTC/KVS path; go2rtc's `format=wyze`
+# adapter speaks it correctly. See README.md in this directory.
+
+api:
+  listen: ":1984"     # go2rtc web UI / API  (optional: http://<host>:1984)
+rtsp:
+  listen: ":8561"     # go2rtc RTSP output   (NOT 8554 — that's the bridge's MediaMTX)
+webrtc:
+  listen: ":8555"     # go2rtc's own WebRTC listener (not needed for RTSP-out, keep it off the bridge's ports)
+
+streams:
+  # One line per camera:
+  #   <camera_uri>: webrtc:http://<BRIDGE_IP>:5000/signaling/<camera_uri>?kvs#format=wyze
+  #
+  # - <camera_uri> is the name in the bridge's RTSP path, i.e. the last segment of
+  #   rtsp://<bridge>:8554/<camera_uri>  (also the "name_uri" field in the bridge's
+  #   http://<bridge>:5000/api output). Spaces/caps are normalised, e.g.
+  #   "Front Yard Cam" -> "front_yard_cam".
+  # - #format=wyze is REQUIRED — it applies the Wyze-specific SDP handling.
+  # - If go2rtc runs on the SAME host as the bridge, use 127.0.0.1 for <BRIDGE_IP>.
+
+  driveway: webrtc:http://127.0.0.1:5000/signaling/driveway?kvs#format=wyze
+  # front_yard_cam: webrtc:http://127.0.0.1:5000/signaling/front_yard_cam?kvs#format=wyze

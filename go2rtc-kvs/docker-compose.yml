@@ -1,0 +1,34 @@
+# go2rtc + relay: stream Wyze cameras over WebRTC/KVS into the bridge's MediaMTX
+# when TUTK is dead (IOTC_ER_TIMEOUT). Run this ALONGSIDE the wyze-bridge container,
+# on the same host. See README.md.
+#
+#   docker compose -f docker-compose.yml up -d
+#
+# Both services use host networking so go2rtc can reach the camera (LAN) + Wyze/AWS
+# (internet) for WebRTC, and the relay can reach the bridge on 127.0.0.1.
+
+services:
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    container_name: wyze-go2rtc
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
+
+  relay:
+    image: alexxit/go2rtc:latest      # reused only for its bundled ffmpeg + sh
+    container_name: wyze-kvs-relay
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      - go2rtc
+    entrypoint: ["/bin/sh", "/relay.sh"]
+    environment:
+      # Comma-separated camera URIs — MUST match the stream names in go2rtc.yaml
+      # (and the bridge's rtsp://<bridge>:8554/<uri> paths).
+      CAMERAS: "driveway"
+      # GO2RTC: "rtsp://127.0.0.1:8561"   # override if go2rtc runs elsewhere
+      # MTX:    "rtsp://127.0.0.1:8554"   # override if the bridge runs elsewhere
+    volumes:
+      - ./relay.sh:/relay.sh:ro
