@@ -1,0 +1,6 @@
+# Vendor keys copied verbatim from upstream mrlt8/docker-wyze-bridge (public app/SDK
+# identifiers, not user credentials). See app/.env and app/wyzecam/api.py.
+7a06b6bb15d77c0fbebf03522670bc522e88210e:app/.env:generic-api-key:5
+7a06b6bb15d77c0fbebf03522670bc522e88210e:app/wyzecam/api.py:generic-api-key:353
+app/.env:generic-api-key:5
+app/wyzecam/api.py:generic-api-key:353
