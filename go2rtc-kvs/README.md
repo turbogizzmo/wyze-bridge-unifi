@@ -19,7 +19,7 @@ updates have moved cameras off it. But the camera still streams over Wyze's
 
 [**go2rtc**](https://github.com/AlexxIT/go2rtc) can connect to that KVS path with its
 `#format=wyze` adapter (which handles Wyze's non-standard SDP), and this bridge already
-exposes the signaling the adapter needs at `GET /signaling/<cam>?kvs`.
+exposes the signaling the adapter needs at `GET /signaling/<cam>?kvs&api=<WB_API>`.
 
 ```
 camera ──Wyze cloud / AWS KVS──▶ go2rtc (#format=wyze) ──ffmpeg copy──▶ bridge MediaMTX ──▶ ONVIF ──▶ UniFi Protect
@@ -39,7 +39,8 @@ The relay republishes go2rtc's stream into the bridge's **existing** MediaMTX pa
 ## Prerequisites
 - The `wyze-bridge` container is already running on this host with the web/API on `:5000`,
   MediaMTX RTSP on `:8554`, and (for Protect) the ONVIF server on `:8000`.
-- `WB_AUTH=false` (or you can reach `/signaling/<cam>?kvs` without web auth).
+- The bridge's API key, `WB_API`. With `WB_AUTH=true` (the default) `/signaling` needs it.
+  Set `WB_API` explicitly on the bridge (e.g. `openssl rand -hex 24`) so it doesn't change.
 - Docker + Docker Compose on the same host as the bridge.
 
 ## Deploy
@@ -47,17 +48,18 @@ The relay republishes go2rtc's stream into the bridge's **existing** MediaMTX pa
 1. **Find each camera's URI.** It's the last segment of the bridge's RTSP path and the
    `name_uri` field in the API:
    ```bash
-   curl -s http://<BRIDGE_IP>:5000/api | grep -o '"name_uri":"[^"]*"'
+   curl -s -H "api: <WB_API>" http://<BRIDGE_IP>:5000/api | grep -o '"name_uri":"[^"]*"'
    ```
    e.g. `driveway`, `front_yard_cam`.
 
 2. **Add a stream per camera** in [`go2rtc.yaml`](go2rtc.yaml):
    ```yaml
    streams:
-     driveway:       webrtc:http://127.0.0.1:5000/signaling/driveway?kvs#format=wyze
-     front_yard_cam: webrtc:http://127.0.0.1:5000/signaling/front_yard_cam?kvs#format=wyze
+     driveway:       webrtc:http://127.0.0.1:5000/signaling/driveway?kvs&api=<WB_API>#format=wyze
+     front_yard_cam: webrtc:http://127.0.0.1:5000/signaling/front_yard_cam?kvs&api=<WB_API>#format=wyze
    ```
-   (Use `127.0.0.1` if go2rtc runs on the same host as the bridge; otherwise the bridge's IP.)
+   (Use `127.0.0.1` if go2rtc runs on the same host as the bridge; otherwise the bridge's IP.
+   Replace `<WB_API>` with the bridge's API key.)
 
 3. **List those same URIs** in [`docker-compose.yml`](docker-compose.yml):
    ```yaml
@@ -72,13 +74,22 @@ The relay republishes go2rtc's stream into the bridge's **existing** MediaMTX pa
 
 5. **Verify** the bridge's RTSP path now has media (this is what Protect reads):
    ```bash
-   # replace creds with your STREAM_AUTH; 'wyze:wyze' is the sample default
+   # replace <user>:<pass> with a STREAM_AUTH pair (or wb:<WB_API>)
    docker exec wyze-go2rtc ffprobe -rtsp_transport tcp \
-     "rtsp://wyze:wyze@127.0.0.1:8554/driveway"
+     "rtsp://<user>:<pass>@127.0.0.1:8554/driveway"
    # expect: Stream ... Video: h264 ... 640x360 ... 20 fps
    ```
    In Protect the camera should start showing video within a retry cycle. If it was
    never adopted, adopt it now via ONVIF as usual (see the repo's main README).
+
+## Security notes
+- go2rtc's API/UI (`:1984`) and RTSP (`:8561`) have no authentication of their own, so
+  [`go2rtc.yaml`](go2rtc.yaml) binds them to `127.0.0.1`. Earlier versions of this stack
+  bound them to all interfaces, which let anyone on the LAN watch the camera and change
+  streams. If you need them reachable from other machines, add `username`/`password`
+  under `api:` and `rtsp:` in `go2rtc.yaml` rather than just widening `listen`.
+- The go2rtc image is pinned by version and digest in
+  [`docker-compose.yml`](docker-compose.yml) instead of `:latest`.
 
 ## Home Assistant
 
@@ -88,7 +99,7 @@ a camera entity at it:
 
 ```yaml
 streams:
-  driveway: webrtc:http://<BRIDGE_IP>:5000/signaling/driveway?kvs#format=wyze
+  driveway: webrtc:http://<BRIDGE_IP>:5000/signaling/driveway?kvs&api=<WB_API>#format=wyze
 ```
 
 Then use it as a go2rtc/WebRTC camera source. The bridge add-on itself needs no changes.
@@ -101,8 +112,11 @@ Then use it as a go2rtc/WebRTC camera source. The bridge add-on itself needs no 
   publisher. Ensure the bridge's default localhost-publish is intact, or set
   `MTX: "rtsp://<user>:<pass>@127.0.0.1:8554"` in the compose (use a `STREAM_AUTH` pair
   that has publish permission).
-- **go2rtc gets no media** — open `http://<host>:1984`, check the stream. Confirm
-  `curl http://<BRIDGE_IP>:5000/signaling/<cam>?kvs` returns `"result":"ok"`. If it
+- **go2rtc gets no media** — open the go2rtc UI, check the stream. It listens on
+  `127.0.0.1:1984` only, so open it on the host or through an SSH tunnel
+  (`ssh -L 1984:127.0.0.1:1984 <host>`, then `http://127.0.0.1:1984`). Confirm
+  `curl "http://<BRIDGE_IP>:5000/signaling/<cam>?kvs&api=<WB_API>"` returns `"result":"ok"`
+  (HTTP 401 means the `api=` key is missing or wrong). If it
   returns 404 / "does not support WebRTC", that camera model has no KVS path.
 - **Only some cameras work** — each must return `"result":"ok"` from the signaling
   endpoint; models without a KVS path can't use this workaround.

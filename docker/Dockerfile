@@ -36,23 +36,34 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Fetch ffmpeg + mediamtx, stage SDK libs, and write a build date safely
 RUN set -eux; \
     echo "BUILDING IMAGE FOR $(uname -m)"; \
+    # Pinned releases + SHA-256 of each download (from the releases' published
+    # digests). When bumping FFMPEG_TAG (here) or MTX_TAG (app/.env), update the hashes.
+    FFMPEG_TAG=v2.2.2; \
     if [ "$(uname -m)" = "armv7l" ]; then \
         TARGETARCH=arm; FFMPEG_ARCH=arm32v7; MTX_ARCH=armv7; \
+        FFMPEG_SHA256=7ca3a11389c3f1f06d620a3a1949a5ecfdc16112dd88ba2e7e9cdc8ec278d3af; \
+        MTX_SHA256=97c8e9167a8ba06dbe0c3cc86879b109b653d3c4699552dad69509b47d6cd36e; \
     elif [ "$(uname -m)" = "aarch64" ]; then \
         TARGETARCH=arm64; FFMPEG_ARCH=aarch64; MTX_ARCH=arm64; \
+        FFMPEG_SHA256=3ed1724533921b6b54d1fd35802af62abd29e8672e0afb94bb2f8c18158323a3; \
+        MTX_SHA256=61b37116e36417a1afb9395f9f0d0c63d97f30cbdb0e6a6dccf95d69289e97f4; \
     else \
         TARGETARCH=amd64; FFMPEG_ARCH=x86_64; MTX_ARCH=amd64; \
+        FFMPEG_SHA256=b29b9d64111410a322e5e5558d1c4f968864ca44630329dc6cd31295997999a3; \
+        MTX_SHA256=450d1172bf6708cbd630eada115ccfc33453227e16750369113d1dfe34f876d8; \
     fi; \
     cd /build; \
     . app/.env; \
     mkdir -p tokens; \
     # ffmpeg (static) for the detected architecture
-    curl -fsSL "https://github.com/homebridge/ffmpeg-for-homebridge/releases/latest/download/ffmpeg-alpine-${FFMPEG_ARCH}.tar.gz" -o ffmpeg.tar.gz; \
+    curl -fsSL "https://github.com/homebridge/ffmpeg-for-homebridge/releases/download/${FFMPEG_TAG}/ffmpeg-alpine-${FFMPEG_ARCH}.tar.gz" -o ffmpeg.tar.gz; \
+    echo "${FFMPEG_SHA256}  ffmpeg.tar.gz" | sha256sum -c - || (echo "ffmpeg checksum mismatch for ${FFMPEG_TAG} ${FFMPEG_ARCH}" && exit 1); \
     tar tzf ffmpeg.tar.gz || (echo "Invalid ffmpeg tarball for ${FFMPEG_ARCH}" && exit 1); \
     tar xzf ffmpeg.tar.gz -C .; \
     rm ffmpeg.tar.gz; \
     # MediaMTX server
     curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${MTX_TAG}/mediamtx_v${MTX_TAG}_linux_${MTX_ARCH}.tar.gz" -o mediamtx.tar.gz; \
+    echo "${MTX_SHA256}  mediamtx.tar.gz" | sha256sum -c - || (echo "mediamtx checksum mismatch for v${MTX_TAG} ${MTX_ARCH}; update MTX_SHA256" && exit 1); \
     tar tzf mediamtx.tar.gz || (echo "Invalid mediamtx tarball for ${MTX_ARCH}" && exit 1); \
     tar xzf mediamtx.tar.gz -C app; \
     rm mediamtx.tar.gz; \

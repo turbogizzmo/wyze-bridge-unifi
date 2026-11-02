@@ -9,7 +9,9 @@
 
 services:
   go2rtc:
-    image: alexxit/go2rtc:latest
+    # Pinned by tag and digest. To upgrade, pick a release from
+    # https://github.com/AlexxIT/go2rtc/releases and update both.
+    image: alexxit/go2rtc:1.9.14@sha256:675c318b23c06fd862a61d262240c9a63436b4050d177ffc68a32710d9e05bae
     container_name: wyze-go2rtc
     network_mode: host
     restart: unless-stopped
@@ -17,7 +19,8 @@ services:
       - ./go2rtc.yaml:/config/go2rtc.yaml:ro
 
   relay:
-    image: alexxit/go2rtc:latest      # reused only for its bundled ffmpeg + sh
+    # reused only for its bundled ffmpeg + sh; keep in step with the go2rtc image
+    image: alexxit/go2rtc:1.9.14@sha256:675c318b23c06fd862a61d262240c9a63436b4050d177ffc68a32710d9e05bae
     container_name: wyze-kvs-relay
     network_mode: host
     restart: unless-stopped

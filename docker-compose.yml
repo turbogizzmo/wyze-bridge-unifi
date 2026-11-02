@@ -15,16 +15,19 @@ services:
       - API_ID=your-api-id
       - API_KEY=your-api-key
       - WB_IP=192.168.1.x                # IP of the host running this container
-      - WB_AUTH=false
+      - WB_AUTH=true                     # Web UI/API login (see README "Web UI / API authentication")
+      # - WB_PASSWORD=<strong-password>  # Web UI password for user "wbadmin"
+      # - WB_API=<long-random-key>       # API key; required by go2rtc-kvs (e.g. openssl rand -hex 24)
       - QUALITY=sd30                     # use sd30 for Wyze Bulb Cam (HL_BC)
       - ON_DEMAND=false
       - FILTER_NAMES=driveway            # comma-separated camera names to bridge
       - ONVIF_ENABLE=true
       - ONVIF_PORT=8000
       - ONVIF_DISCOVERY=true
-      - STREAM_AUTH=wyze:wyze            # credentials UniFi Protect uses for RTSP
+      - STREAM_AUTH=wyze:CHANGE_ME       # credentials UniFi Protect uses for ONVIF + RTSP; use a strong password
       - FLASK_ENV=production
       - LOG_LEVEL=info
     volumes:
       - ./data:/data
+      - ./tokens:/tokens                 # keeps Wyze tokens and generated WB_PASSWORD/WB_API across re-creates
       - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro

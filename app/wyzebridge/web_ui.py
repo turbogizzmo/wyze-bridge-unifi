@@ -16,7 +16,7 @@ from wyzebridge.stream import Stream, StreamManager
 
 auth = HTTPBasicAuth()
 
-API_ENDPOINTS = "/api", "/img", "/snapshot", "/thumb", "/photo"
+API_ENDPOINTS = "/api", "/img", "/snapshot", "/thumb", "/photo", "/signaling"
 
 
 @auth.verify_password
