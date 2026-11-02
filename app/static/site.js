@@ -500,23 +500,23 @@ document.addEventListener("DOMContentLoaded", () => {
               let newRow = table.insertRow();
               let keyCell = newRow.insertCell(0)
               let valCell = newRow.insertCell(1)
-              keyCell.innerHTML = k
-              valCell.innerHTML = "<code>" + JSON.stringify(v, null, 2) + "</code>"
+              keyCell.textContent = k
+              valCell.appendChild(document.createElement("code")).textContent = JSON.stringify(v, null, 2)
             }
             continue;
           }
           let newRow = table.insertRow();
           let keyCell = newRow.insertCell(0)
           let valCell = newRow.insertCell(1)
-          keyCell.innerHTML = key
+          keyCell.textContent = key
           if (typeof value === 'string' && (key.endsWith("_url") || key == 'thumbnail')) {
             let link = document.createElement('a');
             link.href = value;
             link.title = value;
-            link.innerHTML = value.substring(0, Math.min(40, value.length)) + (value.length >= 40 ? "..." : "");
+            link.textContent = value.substring(0, Math.min(40, value.length)) + (value.length >= 40 ? "..." : "");
             valCell.appendChild(link)
           } else {
-            valCell.innerHTML = "<code>" + value + "</code>"
+            valCell.appendChild(document.createElement("code")).textContent = String(value)
           }
         }
       }).catch(error => { console.error(error); });

@@ -1,7 +1,7 @@
 from typing import Optional
 
 import requests
-from wyzebridge.bridge_utils import env_cam
+from wyzebridge.bridge_utils import env_bool, env_cam
 from wyzebridge.config import VERSION
 from wyzebridge.logging import logger
 
@@ -21,7 +21,9 @@ def send_webhook(event: str, camera: str, msg: str, img: Optional[str] = None) -
 
     logger.debug(f"[WEBHOOKS] 📲 Triggering {event.upper()} event for {camera}")
     try:
-        resp = requests.post(url, headers=header, data=msg, verify=False)
+        # Verify TLS by default; WEBHOOK_VERIFY_SSL=false allows self-signed endpoints.
+        verify = env_bool("WEBHOOK_VERIFY_SSL", "true", style="bool")
+        resp = requests.post(url, headers=header, data=msg, verify=verify)
         resp.raise_for_status()
     except Exception as ex:
         print(f"[WEBHOOKS] {ex}")

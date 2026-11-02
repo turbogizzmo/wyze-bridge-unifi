@@ -5,6 +5,7 @@ from subprocess import DEVNULL, Popen
 from typing import Optional
 
 import yaml
+from wyzebridge.auth import redact_password
 from wyzebridge.bridge_utils import env_bool
 from wyzebridge.logging import logger
 
@@ -227,6 +228,10 @@ def generate_certificates(cert_path):
         ).wait()
 
 
+# Sample/placeholder values that must not be used as real stream passwords.
+WEAK_STREAM_PASSWORDS = {"wyze", "change_me", "changeme", "password", "admin"}
+
+
 def parse_auth(auth: str) -> list[dict[str, str]]:
     entries = []
     for entry in auth.split("|"):
@@ -234,6 +239,11 @@ def parse_auth(auth: str) -> list[dict[str, str]]:
         if ":" not in creds:
             continue
         user, password, *ips = creds.split(":", 2)
+        if password.lower() in WEAK_STREAM_PASSWORDS or len(password) < 8:
+            logger.warning(
+                f"[MTX] ⚠️ STREAM_AUTH password for '{user or 'any'}' is a known default or "
+                "shorter than 8 characters. Anyone on the network can guess it; set a strong one."
+            )
         if ips:
             ips = ips[0].split(",")
         data = {"user": user or "any", "pass": password, "ips": ips, "permissions": [{"action": "read"}]}
@@ -245,6 +255,6 @@ def parse_auth(auth: str) -> list[dict[str, str]]:
         else:
             paths = "all"
             data["permissions"].append({"action": "read"})
-        logger.info(f"[MTX] Auth [{data['user']}:{data['pass']}] {paths=}")
+        logger.info(f"[MTX] Auth [{data['user']}:{redact_password(data['pass'])}] {paths=}")
         entries.append(data)
     return entries

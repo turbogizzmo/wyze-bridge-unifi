@@ -5,16 +5,24 @@
 # The camera still streams over Wyze's WebRTC/KVS path; go2rtc's `format=wyze`
 # adapter speaks it correctly. See README.md in this directory.
 
+# go2rtc's API/UI and RTSP server have no authentication unless configured, and
+# this stack uses host networking, so ":port" would expose live video and stream
+# control to the whole LAN. Only the relay (on this host) reads them: keep them on
+# loopback. To use the web UI from another machine, tunnel it
+# (ssh -L 1984:127.0.0.1:1984 <host>) rather than opening the port.
 api:
-  listen: ":1984"     # go2rtc web UI / API  (optional: http://<host>:1984)
+  listen: "127.0.0.1:1984"   # go2rtc web UI / API (local only: http://127.0.0.1:1984)
 rtsp:
-  listen: ":8561"     # go2rtc RTSP output   (NOT 8554 — that's the bridge's MediaMTX)
+  listen: "127.0.0.1:8561"   # go2rtc RTSP output, read by relay.sh (NOT 8554 — that's the bridge's MediaMTX)
 webrtc:
-  listen: ":8555"     # go2rtc's own WebRTC listener (not needed for RTSP-out, keep it off the bridge's ports)
+  # WebRTC ICE port for the connection to Wyze/KVS. It must stay on a routable
+  # interface for ICE to work; it carries no media without signaling through the
+  # (loopback-only) API above.
+  listen: ":8555"
 
 streams:
   # One line per camera:
-  #   <camera_uri>: webrtc:http://<BRIDGE_IP>:5000/signaling/<camera_uri>?kvs#format=wyze
+  #   <camera_uri>: webrtc:http://<BRIDGE_IP>:5000/signaling/<camera_uri>?kvs&api=<WB_API>#format=wyze
   #
   # - <camera_uri> is the name in the bridge's RTSP path, i.e. the last segment of
   #   rtsp://<bridge>:8554/<camera_uri>  (also the "name_uri" field in the bridge's
@@ -22,6 +30,9 @@ streams:
   #   "Front Yard Cam" -> "front_yard_cam".
   # - #format=wyze is REQUIRED — it applies the Wyze-specific SDP handling.
   # - If go2rtc runs on the SAME host as the bridge, use 127.0.0.1 for <BRIDGE_IP>.
+  # - <WB_API> is the bridge's API key (the WB_API env var / secret). The bridge's
+  #   /signaling endpoint requires it when WB_AUTH=true (the default). Without it
+  #   go2rtc gets HTTP 401.
 
-  driveway: webrtc:http://127.0.0.1:5000/signaling/driveway?kvs#format=wyze
-  # front_yard_cam: webrtc:http://127.0.0.1:5000/signaling/front_yard_cam?kvs#format=wyze
+  driveway: webrtc:http://127.0.0.1:5000/signaling/driveway?kvs&api=<WB_API>#format=wyze
+  # front_yard_cam: webrtc:http://127.0.0.1:5000/signaling/front_yard_cam?kvs&api=<WB_API>#format=wyze

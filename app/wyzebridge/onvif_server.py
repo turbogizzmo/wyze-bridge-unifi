@@ -3,18 +3,24 @@ ONVIF Server implementation for Wyze Bridge.
 Exposes Wyze cameras as ONVIF-compliant devices.
 """
 
+import base64
 import hashlib
+import hmac
+import ipaddress
 import logging
+import re
+import secrets
 import socket
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import struct
 import socketserver
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs, quote
+from xml.sax.saxutils import escape as xml_escape
 
 import netifaces
 from lxml import etree
@@ -28,6 +34,52 @@ from wyzebridge.config import BRIDGE_IP, RTSP_URL
 from wyzebridge.logging import logger
 from wyzebridge.onvif_ptz import PTZService
 from wyzecam.api_models import WyzeCamera
+
+WSSE_NS = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd'
+WSU_NS = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd'
+PASSWORD_DIGEST = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest'
+
+# ONVIF Core lets clients call these before authenticating (PRE_AUTH access class).
+UNAUTHENTICATED_ACTIONS = {'GetSystemDateAndTime'}
+# Accepted clock difference for WS-Security <wsu:Created> and HTTP Digest nonces.
+AUTH_WINDOW = 300
+DIGEST_REALM = 'wyze-bridge-onvif'
+# Largest SOAP request body accepted; real ONVIF requests are a few KiB.
+MAX_REQUEST_BYTES = 64 * 1024
+
+
+# WS-Discovery: namespaces a Probe may use, and the per-source reply rate limit.
+WS_DISCOVERY_NAMESPACES = {
+    'http://schemas.xmlsoap.org/ws/2005/04/discovery',
+    'http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01',
+}
+PROBE_LIMIT = 10
+PROBE_WINDOW = 10
+
+
+LOCAL_NETWORKS = [ipaddress.ip_network(n) for n in (
+    '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16',  # RFC 1918
+    '169.254.0.0/16', '127.0.0.0/8',                   # link-local, loopback
+    'fc00::/7', 'fe80::/10', '::1/128',
+)]
+
+
+def _is_local_address(ip: str) -> bool:
+    """True for RFC 1918 / link-local / loopback (and IPv6 equivalents) sources."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(addr in net for net in LOCAL_NETWORKS if net.version == addr.version)
+
+
+def parse_xml(data: bytes):
+    """Parse untrusted XML from the network with DTDs, entities and network access disabled."""
+    upper = data.upper()
+    if b'<!DOCTYPE' in upper or b'<!ENTITY' in upper:
+        raise ValueError("DTDs and entity declarations are not allowed")
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False, huge_tree=False)
+    return etree.fromstring(data, parser)
 
 
 class OnvifCamera:
@@ -176,6 +228,7 @@ class WSDiscoveryServer:
         self.sock = None
         self.thread = None
         self.announce_thread = None
+        self._probe_times: Dict[str, List[float]] = {}
         
     def start(self):
         """Start the discovery server."""
@@ -316,27 +369,46 @@ class WSDiscoveryServer:
     def _handle_probe(self, data: bytes, addr):
         """Handle probe requests."""
         try:
-            message = data.decode('utf-8')
-            logger.debug(f"[ONVIF] Raw probe data: {message[:500]}...")
+            logger.debug(f"[ONVIF] Raw probe data: {data[:500].decode('utf-8', 'replace')}...")
             
-            # Simple XML parsing to check for Probe
-            if 'Probe>' not in message:
+            # Replies are several KB per camera and go to the claimed source address,
+            # so only answer local senders, a few times per window (no UDP reflection).
+            if not _is_local_address(addr[0]):
+                logger.debug(f"[ONVIF] Ignoring probe from non-local address {addr[0]}")
+                return
+            if not self._allow_probe(addr[0]):
+                logger.debug(f"[ONVIF] Probe rate limit hit for {addr[0]}, ignoring")
+                return
+                
+            try:
+                root = parse_xml(data)
+            except Exception as xml_error:
+                logger.debug(f"[ONVIF] Ignoring malformed probe from {addr[0]}: {xml_error}")
+                return
+                
+            probe = next(
+                (el for el in root.iter() if isinstance(el.tag, str) and el.tag.split('}')[-1] == 'Probe'
+                 and el.tag.startswith('{') and el.tag[1:].split('}')[0] in WS_DISCOVERY_NAMESPACES),
+                None,
+            )
+            if probe is None:
                 logger.debug("[ONVIF] Not a Probe message, ignoring")
+                return
+            types = ''.join(el.text or '' for el in probe if isinstance(el.tag, str) and el.tag.endswith('}Types'))
+            if types.strip() and 'NetworkVideoTransmitter' not in types and 'Device' not in types:
+                logger.debug(f"[ONVIF] Probe for other types ({types.strip()}), ignoring")
                 return
                 
             logger.info(f"[ONVIF] 🎯 Valid Probe received from {addr[0]}:{addr[1]}")
             
             # Extract MessageID for RelatesTo
             message_id = None
-            try:
-                root = etree.fromstring(data)
-                msg_elem = root.find('.//{http://www.w3.org/2005/08/addressing}MessageID')
-                if msg_elem is not None:
-                    message_id = msg_elem.text.replace('urn:uuid:', '')
-                    logger.debug(f"[ONVIF] Extracted MessageID: {message_id}")
-            except Exception as xml_error:
-                logger.warning(f"[ONVIF] XML parse error: {xml_error}")
-                message_id = str(uuid.uuid4())
+            msg_elem = root.find('.//{http://www.w3.org/2005/08/addressing}MessageID')
+            if msg_elem is None:
+                msg_elem = root.find('.//{http://schemas.xmlsoap.org/ws/2004/08/addressing}MessageID')
+            if msg_elem is not None and msg_elem.text:
+                message_id = xml_escape(msg_elem.text.strip().replace('urn:uuid:', '')[:100])
+                logger.debug(f"[ONVIF] Extracted MessageID: {message_id}")
             
             if not message_id:
                 message_id = str(uuid.uuid4())
@@ -364,6 +436,18 @@ class WSDiscoveryServer:
             logger.error(f"[ONVIF] Probe handling error: {e}")
             logger.error(f"[ONVIF] Raw data length: {len(data)} bytes")
             
+    def _allow_probe(self, ip: str) -> bool:
+        """Per-source rate limit: PROBE_LIMIT probes per PROBE_WINDOW seconds."""
+        now = time.time()
+        if len(self._probe_times) > 1024:
+            self._probe_times = {k: v for k, v in self._probe_times.items() if v and v[-1] > now - PROBE_WINDOW}
+        recent = [t for t in self._probe_times.get(ip, []) if t > now - PROBE_WINDOW]
+        if len(recent) >= PROBE_LIMIT:
+            self._probe_times[ip] = recent
+            return False
+        self._probe_times[ip] = recent + [now]
+        return True
+        
     def _create_probe_match(self, camera: OnvifCamera, relates_to: str) -> bytes:
         """Create UniFi-compatible ProbeMatch response."""
         message_id = str(uuid.uuid4())
@@ -420,6 +504,9 @@ class WSDiscoveryServer:
 class OnvifHTTPHandler(BaseHTTPRequestHandler):
     """HTTP handler for ONVIF requests."""
     
+    # Socket timeout so a stalled client can't hold a worker thread forever.
+    timeout = 10
+    
     def __init__(self, *args, onvif_server=None, **kwargs):
         self.onvif_server = onvif_server
         super().__init__(*args, **kwargs)
@@ -428,10 +515,15 @@ class OnvifHTTPHandler(BaseHTTPRequestHandler):
         """Handle GET requests."""
         logger.info(f"[ONVIF] GET request to: {self.path}")
         
-        if self.path == '/onvif/test':
-            self._serve_test_page()
-        elif self.path == '/onvif/discovery_test':
-            self._serve_discovery_test()
+        if self.path in ('/onvif/test', '/onvif/discovery_test'):
+            # Status pages list camera names, MACs and UUIDs: require a login.
+            creds = self.onvif_server.credentials()
+            if not creds or not self._check_http_auth(creds):
+                self._send_not_authorized(b'')
+            elif self.path == '/onvif/test':
+                self._serve_test_page()
+            else:
+                self._serve_discovery_test()
         elif self.path == '/onvif/device_service':
             self._serve_wsdl('device')
         elif self.path == '/onvif/credential_test':
@@ -442,17 +534,30 @@ class OnvifHTTPHandler(BaseHTTPRequestHandler):
             
     def do_POST(self):
         """Handle SOAP POST requests."""
-        content_length = int(self.headers.get('Content-Length', 0))
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+        except ValueError:
+            self.send_error(400)
+            return
+        if content_length < 0 or content_length > MAX_REQUEST_BYTES:
+            logger.warning(f"[ONVIF] Rejecting request with Content-Length {content_length}")
+            self.send_error(413 if content_length > 0 else 400)
+            return
         post_data = self.rfile.read(content_length)
         
         logger.info(f"[ONVIF] POST request received, Content-Length: {content_length}")
-        logger.debug(f"[ONVIF] POST data preview: {post_data.decode('utf-8')[:500]}...")
+        # Mask WS-Security passwords/digests before logging the request body.
+        preview = re.sub(rb'(<(?:[\w-]+:)?Password\b[^>]*>)[^<]*', rb'\1***', post_data)
+        logger.debug(f"[ONVIF] POST data preview: {preview.decode('utf-8', 'replace')[:500]}...")
         
         try:
-            # Check for WS-Security in SOAP body instead of HTTP Basic Auth
-            auth_result = self._check_ws_security(post_data)
-            if not auth_result:
-                return  # Authentication handler already sent response
+            self.auth_cred = None
+            action = self._get_action(post_data)
+            if action not in UNAUTHENTICATED_ACTIONS:
+                self.auth_cred = self._authenticate(post_data)
+                if not self.auth_cred:
+                    self._send_not_authorized(post_data)
+                    return
                 
             response = self._handle_soap_request(post_data)
             
@@ -466,73 +571,159 @@ class OnvifHTTPHandler(BaseHTTPRequestHandler):
             logger.error(f"[ONVIF] SOAP error: {e}")
             self.send_error(500)
             
-    def _check_ws_security(self, soap_data: bytes):
-        """Check WS-Security authentication in SOAP message."""
+    def _get_action(self, soap_data: bytes) -> Optional[str]:
+        """Return the local name of the first element in the SOAP Body."""
         try:
-            soap_str = soap_data.decode('utf-8')
-            
-            # Check if there's a WS-Security header
-            if 'Security>' in soap_str or 'UsernameToken>' in soap_str:
-                logger.info("[ONVIF] WS-Security authentication detected")
-                
-                # Parse username from WS-Security header
-                try:
-                    root = etree.fromstring(soap_data)
-                    username_elem = root.find('.//{http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd}Username')
-                    password_elem = root.find('.//{http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd}Password')
-                    
-                    username = username_elem.text if username_elem is not None else "unknown"
-                    password = password_elem.text if password_elem is not None else "unknown"
-                    
-                    logger.info(f"[ONVIF] WS-Security auth: username='{username}', password={'*' * len(password)}")
-                    logger.info(f"[ONVIF] ✅ WS-Security authentication accepted")
-                    return True
-                    
-                except Exception as parse_error:
-                    logger.warning(f"[ONVIF] WS-Security parsing error: {parse_error}")
-                    # Continue to accept anyway for compatibility
-                    return True
-            else:
-                # No WS-Security found - for ONVIF compatibility, many devices allow unauthenticated access to basic operations
-                logger.info("[ONVIF] No WS-Security found, allowing unauthenticated access for compatibility")
-                return True
-                
+            root = parse_xml(soap_data)
+            body = root.find('.//{http://www.w3.org/2003/05/soap-envelope}Body')
+            if body is None:
+                body = root.find('.//{http://schemas.xmlsoap.org/soap/envelope/}Body')
+            if body is not None:
+                for child in body:
+                    return child.tag.split('}')[-1] if '}' in child.tag else child.tag
         except Exception as e:
-            logger.error(f"[ONVIF] Authentication check error: {e}")
-            # Default to allowing access for compatibility
-            return True
-            
-    def _check_authentication(self):
-        """Check HTTP Basic Authentication - accepts any credentials."""
-        auth_header = self.headers.get('Authorization')
+            logger.debug(f"[ONVIF] Could not read SOAP action: {e}")
+        return None
         
-        if not auth_header:
-            # For ONVIF compatibility, allow unauthenticated access to some operations
-            logger.info("[ONVIF] No HTTP auth provided, allowing for ONVIF compatibility")
-            return True
+    def _authenticate(self, soap_data: bytes) -> Optional[Tuple[str, str, bool]]:
+        """Verify WS-Security UsernameToken or HTTP Digest/Basic credentials.
+        
+        Returns the matching credential, or None if the request is not authorized.
+        """
+        creds = self.onvif_server.credentials()
+        if not creds:
+            logger.error("[ONVIF] No ONVIF credentials configured (set STREAM_AUTH or ONVIF_USERNAME/ONVIF_PASSWORD); rejecting request")
+            return None
             
-        # Parse Basic Auth if provided
-        if auth_header.startswith('Basic '):
+        if cred := self._check_ws_security(soap_data, creds):
+            return cred
+        if cred := self._check_http_auth(creds):
+            return cred
+        return None
+        
+    def _check_ws_security(self, soap_data: bytes, creds) -> Optional[Tuple[str, str, bool]]:
+        """Check a WS-Security UsernameToken (PasswordDigest or PasswordText)."""
+        try:
+            root = parse_xml(soap_data)
+        except Exception:
+            return None
+        token = root.find(f'.//{{{WSSE_NS}}}UsernameToken')
+        if token is None:
+            return None
+            
+        username = token.findtext(f'{{{WSSE_NS}}}Username') or ''
+        password_elem = token.find(f'{{{WSSE_NS}}}Password')
+        if password_elem is None:
+            return None
+        supplied = (password_elem.text or '').strip()
+        
+        if password_elem.get('Type', '') == PASSWORD_DIGEST:
+            nonce_b64 = (token.findtext(f'{{{WSSE_NS}}}Nonce') or '').strip()
+            created = (token.findtext(f'{{{WSU_NS}}}Created') or '').strip()
+            if not nonce_b64 or not created or not _created_is_fresh(created):
+                logger.warning(f"[ONVIF] WS-Security digest rejected for '{username}': missing or stale nonce/created")
+                return None
             try:
-                import base64
-                encoded_credentials = auth_header[6:]  # Remove "Basic "
-                decoded_credentials = base64.b64decode(encoded_credentials).decode('utf-8')
-                username, password = decoded_credentials.split(':', 1)
-                
-                logger.info(f"[ONVIF] HTTP Basic auth: username='{username}', password={'*' * len(password)}")
-                logger.info(f"[ONVIF] ✅ HTTP Basic authentication accepted")
-                return True
-                
-            except Exception as e:
-                logger.error(f"[ONVIF] HTTP auth parsing error: {e}")
-                return True  # Allow anyway for compatibility
-                
-        return True  # Allow all requests for now
+                nonce = base64.b64decode(nonce_b64)
+            except Exception:
+                return None
+            for cred in _matching_creds(creds, username):
+                expected = base64.b64encode(
+                    hashlib.sha1(nonce + created.encode() + cred[1].encode()).digest()
+                ).decode()
+                if hmac.compare_digest(expected, supplied):
+                    if not self.onvif_server.use_nonce(nonce_b64, created):
+                        logger.warning(f"[ONVIF] WS-Security nonce replay rejected for '{username}'")
+                        return None
+                    logger.info(f"[ONVIF] ✅ WS-Security digest authentication accepted for '{username}'")
+                    return cred
+        else:
+            for cred in _matching_creds(creds, username):
+                if hmac.compare_digest(cred[1].encode(), supplied.encode()):
+                    logger.info(f"[ONVIF] ✅ WS-Security authentication accepted for '{username}'")
+                    return cred
+                    
+        logger.warning(f"[ONVIF] WS-Security authentication failed for '{username}'")
+        return None
+        
+    def _check_http_auth(self, creds) -> Optional[Tuple[str, str, bool]]:
+        """Check HTTP Digest (RFC 2617) or Basic credentials."""
+        auth_header = self.headers.get('Authorization') or ''
+        scheme, _, value = auth_header.partition(' ')
+        scheme = scheme.lower()
+        
+        if scheme == 'basic':
+            try:
+                username, _, password = base64.b64decode(value.strip()).decode('utf-8').partition(':')
+            except Exception:
+                return None
+            for cred in _matching_creds(creds, username):
+                if hmac.compare_digest(cred[1].encode(), password.encode()):
+                    logger.info(f"[ONVIF] ✅ HTTP Basic authentication accepted for '{username}'")
+                    return cred
+            logger.warning(f"[ONVIF] HTTP Basic authentication failed for '{username}'")
+            
+        elif scheme == 'digest':
+            params = _parse_digest_header(value)
+            username = params.get('username', '')
+            nonce = params.get('nonce', '')
+            if params.get('realm') != DIGEST_REALM or not self.onvif_server.valid_digest_nonce(nonce):
+                logger.warning(f"[ONVIF] HTTP Digest rejected for '{username}': bad realm or stale nonce")
+                return None
+            if params.get('algorithm', 'MD5').upper() != 'MD5':
+                return None
+            ha2 = _md5(f"{self.command}:{params.get('uri', '')}")
+            for cred in _matching_creds(creds, username):
+                ha1 = _md5(f"{username}:{DIGEST_REALM}:{cred[1]}")
+                if params.get('qop'):
+                    expected = _md5(f"{ha1}:{nonce}:{params.get('nc', '')}:{params.get('cnonce', '')}:{params['qop']}:{ha2}")
+                else:
+                    expected = _md5(f"{ha1}:{nonce}:{ha2}")
+                if hmac.compare_digest(expected, params.get('response', '')):
+                    logger.info(f"[ONVIF] ✅ HTTP Digest authentication accepted for '{username}'")
+                    return cred
+            logger.warning(f"[ONVIF] HTTP Digest authentication failed for '{username}'")
+            
+        return None
+        
+    def _send_not_authorized(self, soap_data: bytes):
+        """Reply with an ONVIF NotAuthorized fault.
+        
+        WS-Security failures get HTTP 400 (ONVIF Core 5.12); requests without a
+        UsernameToken get HTTP 401 with a Digest challenge so clients can retry.
+        """
+        response = f'''<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:ter="http://www.onvif.org/ver10/error">
+    <s:Body>
+        <s:Fault>
+            <s:Code>
+                <s:Value>s:Sender</s:Value>
+                <s:Subcode>
+                    <s:Value>ter:NotAuthorized</s:Value>
+                </s:Subcode>
+            </s:Code>
+            <s:Reason>
+                <s:Text xml:lang="en">Sender not Authorized</s:Text>
+            </s:Reason>
+        </s:Fault>
+    </s:Body>
+</s:Envelope>'''.encode('utf-8')
+        has_token = b'UsernameToken' in soap_data
+        self.send_response(400 if has_token else 401)
+        if not has_token:
+            self.send_header(
+                'WWW-Authenticate',
+                f'Digest realm="{DIGEST_REALM}", qop="auth", algorithm=MD5, nonce="{self.onvif_server.new_digest_nonce()}"',
+            )
+        self.send_header('Content-Type', 'application/soap+xml; charset=utf-8')
+        self.send_header('Content-Length', str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
             
     def _handle_soap_request(self, data: bytes) -> bytes:
         """Handle SOAP requests."""
         try:
-            root = etree.fromstring(data)
+            root = parse_xml(data)
             
             # Extract SOAP action
             body = root.find('.//{http://www.w3.org/2003/05/soap-envelope}Body')
@@ -697,14 +888,16 @@ class OnvifHTTPHandler(BaseHTTPRequestHandler):
             return self._create_soap_fault("No cameras available")
             
         bridge_ip = BRIDGE_IP or "127.0.0.1"
-        from wyzebridge.config import STREAM_AUTH
+        # Only reached by an authenticated caller. Embed RTSP credentials it is
+        # allowed to use: the pair it authenticated with when that pair is also a
+        # MediaMTX login, otherwise the first configured RTSP pair.
         auth_prefix = ""
-        if STREAM_AUTH and ":" in str(STREAM_AUTH):
-            first_creds = str(STREAM_AUTH).split("|")[0].split("@")[0]
-            parts = first_creds.split(":", 2)
-            if len(parts) >= 2:
-                auth_prefix = f"{parts[0]}:{parts[1]}@"
-        rtsp_url = f"rtsp://{auth_prefix}{bridge_ip}:8554/{camera.stream_uri}"
+        rtsp_cred = getattr(self, 'auth_cred', None)
+        if not rtsp_cred or not rtsp_cred[2]:
+            rtsp_cred = next(iter(self.onvif_server.rtsp_credentials()), None)
+        if rtsp_cred and rtsp_cred[0] != '*':
+            auth_prefix = f"{quote(rtsp_cred[0], safe='')}:{quote(rtsp_cred[1], safe='')}@"
+        rtsp_url = xml_escape(f"rtsp://{auth_prefix}{bridge_ip}:8554/{camera.stream_uri}")
         
         response = f'''<?xml version="1.0" encoding="UTF-8"?>
 <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">
@@ -935,6 +1128,45 @@ class OnvifHTTPHandler(BaseHTTPRequestHandler):
         logger.debug(f"[ONVIF] HTTP {format % args}")
 
 
+def _matching_creds(creds, username: str):
+    """Credentials whose username matches ('*' matches any username)."""
+    return [c for c in creds if c[0] == '*' or hmac.compare_digest(c[0].encode(), username.encode())]
+
+
+def _md5(value: str) -> str:
+    return hashlib.md5(value.encode()).hexdigest()
+
+
+def _parse_digest_header(value: str) -> Dict[str, str]:
+    params = {}
+    for key, quoted, bare in re.findall(r'(\w+)\s*=\s*(?:"([^"]*)"|([^\s,]+))', value):
+        params[key.lower()] = quoted or bare
+    return params
+
+
+def _created_is_fresh(created: str) -> bool:
+    """True if a WS-Security <wsu:Created> timestamp is within AUTH_WINDOW of now."""
+    try:
+        ts = datetime.fromisoformat(created.replace('Z', '+00:00'))
+    except ValueError:
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return abs((datetime.now(timezone.utc) - ts).total_seconds()) <= AUTH_WINDOW
+
+
+def parse_stream_auth(stream_auth: str) -> List[Tuple[str, str]]:
+    """user:pass pairs from STREAM_AUTH (same format MediaMTX setup uses)."""
+    pairs = []
+    for entry in (stream_auth or "").split("|"):
+        creds = entry.split("@")[0]
+        if ":" not in creds:
+            continue
+        user, password = creds.split(":", 2)[:2]
+        pairs.append((user or '*', password))
+    return pairs
+
+
 class OnvifServer:
     """Main ONVIF server controller."""
     
@@ -945,6 +1177,58 @@ class OnvifServer:
         self.discovery_server = None
         self.http_server = None
         self.http_thread = None
+        self._secret = secrets.token_bytes(32)
+        self._nonces: Dict[str, float] = {}
+        self._nonce_lock = threading.Lock()
+        
+    def credentials(self) -> List[Tuple[str, str, bool]]:
+        """Accepted ONVIF logins as (username, password, is_rtsp_login).
+        
+        ONVIF_USERNAME/ONVIF_PASSWORD, if both set, are the only ONVIF login.
+        Otherwise the STREAM_AUTH pairs (and the bridge's wb:<WB_API> RTSP login
+        when WB_AUTH is on) are accepted, so UniFi Protect can use one set of
+        credentials for both ONVIF and RTSP.
+        """
+        from wyzebridge.auth import get_secret
+        
+        user, password = get_secret("onvif_username"), get_secret("onvif_password")
+        if user and password:
+            return [(user, password, False)]
+        return self.rtsp_credentials()
+        
+    def rtsp_credentials(self) -> List[Tuple[str, str, bool]]:
+        """MediaMTX read logins: STREAM_AUTH pairs, plus wb:<WB_API> when WB_AUTH is on."""
+        from wyzebridge.auth import WbAuth
+        from wyzebridge.config import STREAM_AUTH
+        
+        creds = [(u, p, True) for u, p in parse_stream_auth(STREAM_AUTH) if p]
+        if WbAuth.enabled and WbAuth.api:
+            creds.append(("wb", WbAuth.api, True))
+        return creds
+        
+    def use_nonce(self, nonce: str, created: str) -> bool:
+        """Record a WS-Security nonce; False if it was already used (replay)."""
+        now = time.time()
+        with self._nonce_lock:
+            self._nonces = {k: v for k, v in self._nonces.items() if v > now}
+            key = f"{nonce}|{created}"
+            if key in self._nonces:
+                return False
+            self._nonces[key] = now + 2 * AUTH_WINDOW
+            return True
+            
+    def new_digest_nonce(self) -> str:
+        ts = str(int(time.time()))
+        sig = hmac.new(self._secret, ts.encode(), hashlib.sha256).hexdigest()
+        return base64.b64encode(f"{ts}:{sig}".encode()).decode()
+        
+    def valid_digest_nonce(self, nonce: str) -> bool:
+        try:
+            ts, _, sig = base64.b64decode(nonce).decode().partition(':')
+            expected = hmac.new(self._secret, ts.encode(), hashlib.sha256).hexdigest()
+            return hmac.compare_digest(sig, expected) and abs(time.time() - int(ts)) <= AUTH_WINDOW
+        except Exception:
+            return False
         
     def setup(self):
         """Setup ONVIF cameras and services."""
@@ -1025,7 +1309,8 @@ class OnvifServer:
             
         def run_server():
             try:
-                self.http_server = HTTPServer(('0.0.0.0', self.port), handler)
+                self.http_server = ThreadingHTTPServer(('0.0.0.0', self.port), handler)
+                self.http_server.daemon_threads = True
                 logger.info(f"[ONVIF] HTTP server listening on 0.0.0.0:{self.port}")
                 self.http_server.serve_forever()
             except Exception as e:

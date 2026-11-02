@@ -1,6 +1,5 @@
 import os
-from base64 import urlsafe_b64encode
-from hashlib import sha256
+import secrets
 from typing import Optional
 
 from werkzeug.security import generate_password_hash
@@ -39,9 +38,22 @@ def clear_local_creds():
             os.remove(file_path)
 
 
-def gen_api_key(email):
-    hash_bytes = sha256(email.encode()).digest()
-    return urlsafe_b64encode(hash_bytes).decode()[:40]
+def gen_credential(file_name: str, length: int = 30) -> str:
+    """Generate a random secret and persist it in TOKEN_PATH (mode 0600).
+
+    Used when WB_PASSWORD/WB_API are not set, so the defaults can't be derived
+    from the (non-secret) Wyze account email.
+    """
+    value = secrets.token_urlsafe(length)[:40]
+    file_path = f"{TOKEN_PATH}{file_name}"
+    try:
+        fd = os.open(file_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as file:
+            file.write(value)
+        logger.info(f"[AUTH] Generated a random {file_name} and saved it to {file_path}")
+    except OSError as ex:
+        logger.warning(f"[AUTH] Could not save generated {file_name} to {file_path}: {ex}")
+    return value
 
 
 class WbAuth:
@@ -69,18 +81,19 @@ class WbAuth:
 
         logger.info(f"[AUTH] WB_USERNAME={cls.username}")
         logger.info(f"[AUTH] WB_PASSWORD={redact_password(cls._pass)}")
-        logger.info(f"[AUTH] WB_API={cls.api}")
+        logger.info(f"[AUTH] WB_API={redact_password(cls.api)}")
 
     @classmethod
     def _update_credentials(cls, email: str, force: bool = False) -> None:
         if force or env_bool("FRESH_DATA"):
             clear_local_creds()
 
-        if not get_credential("wb_password"):
-            cls._pass = email.partition("@")[0]
-            cls._hashed_pass = generate_password_hash(cls._pass)
+        if not (password := get_credential("wb_password")):
+            password = gen_credential("wb_password")
+        cls._pass = password
+        cls._hashed_pass = generate_password_hash(cls._pass)
 
-        cls.api = get_credential("wb_api") or gen_api_key(email)
+        cls.api = get_credential("wb_api") or gen_credential("wb_api")
 
 
 def redact_password(password: Optional[str]):
