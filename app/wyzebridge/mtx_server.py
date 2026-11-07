@@ -92,9 +92,11 @@ class MtxServer:
             mtx.set("pathDefaults.recordSegmentDuration", RECORD_LENGTH)
             mtx.set("pathDefaults.recordDeleteAfter", RECORD_KEEP)
 
-    def setup_auth(self, api: Optional[str], stream: Optional[str]):
+    def setup_auth(
+        self, api: Optional[str], stream: Optional[str], publish: Optional[str] = None
+    ):
         from wyzebridge.config import WB_AUTH
-        if not WB_AUTH and not stream:
+        if not WB_AUTH and not stream and not publish:
             with MtxInterface() as mtx:
                 mtx.set("authInternalUsers", [])
             return
@@ -115,6 +117,12 @@ class MtxServer:
             if stream:
                 logger.info("[MTX] Custom stream auth enabled")
                 for client in parse_auth(stream):
+                    mtx.add("authInternalUsers", client)
+            if publish:
+                # Publish-only logins for relays that can't connect from 127.0.0.1
+                # (e.g. go2rtc-kvs on Docker Desktop, or on another host).
+                logger.info("[MTX] Publish auth enabled")
+                for client in parse_auth(publish, action="publish"):
                     mtx.add("authInternalUsers", client)
 
     def add_path(self, uri: str, on_demand: bool = True):
@@ -232,7 +240,13 @@ def generate_certificates(cert_path):
 WEAK_STREAM_PASSWORDS = {"wyze", "change_me", "changeme", "password", "admin"}
 
 
-def parse_auth(auth: str) -> list[dict[str, str]]:
+def parse_auth(auth: str, action: str = "read") -> list[dict[str, str]]:
+    """Parse `user:pass[:ip,ip][@path,path]|...` into MediaMTX authInternalUsers.
+
+    action="read" is STREAM_AUTH (viewers); action="publish" is STREAM_PUBLISH_AUTH,
+    which grants publish only, so a relay login can't also be used to watch.
+    """
+    env = "STREAM_PUBLISH_AUTH" if action == "publish" else "STREAM_AUTH"
     entries = []
     for entry in auth.split("|"):
         creds, *endpoints = entry.split("@")
@@ -241,20 +255,23 @@ def parse_auth(auth: str) -> list[dict[str, str]]:
         user, password, *ips = creds.split(":", 2)
         if password.lower() in WEAK_STREAM_PASSWORDS or len(password) < 8:
             logger.warning(
-                f"[MTX] ⚠️ STREAM_AUTH password for '{user or 'any'}' is a known default or "
+                f"[MTX] ⚠️ {env} password for '{user or 'any'}' is a known default or "
                 "shorter than 8 characters. Anyone on the network can guess it; set a strong one."
             )
         if ips:
             ips = ips[0].split(",")
-        data = {"user": user or "any", "pass": password, "ips": ips, "permissions": [{"action": "read"}]}
+        permissions = [{"action": "read"}] if action == "read" else []
+        data = {"user": user or "any", "pass": password, "ips": ips, "permissions": permissions}
         if endpoints:
             paths = []
             for endpoint in endpoints[0].split(","):
                 paths.append(endpoint)
-                data["permissions"].append({"action": "read", "path": endpoint})
+                data["permissions"].append({"action": action, "path": endpoint})
         else:
             paths = "all"
-            data["permissions"].append({"action": "read"})
-        logger.info(f"[MTX] Auth [{data['user']}:{redact_password(data['pass'])}] {paths=}")
+            data["permissions"].append({"action": action})
+        logger.info(
+            f"[MTX] {action.capitalize()} auth [{data['user']}:{redact_password(data['pass'])}] {paths=}"
+        )
         entries.append(data)
     return entries

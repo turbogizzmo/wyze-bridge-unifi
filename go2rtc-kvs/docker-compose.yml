@@ -33,5 +33,9 @@ services:
       CAMERAS: "driveway"
       # GO2RTC: "rtsp://127.0.0.1:8561"   # override if go2rtc runs elsewhere
       # MTX:    "rtsp://127.0.0.1:8554"   # override if the bridge runs elsewhere
+      # Not on the bridge's 127.0.0.1 (another host, or Docker Desktop without
+      # network_mode: "container:wyze-bridge")? The bridge then rejects the publish
+      # with 401. Set STREAM_PUBLISH_AUTH=relay:<pass> on the bridge and use:
+      # MTX:    "rtsp://relay:<pass>@<BRIDGE_IP>:8554"
     volumes:
       - ./relay.sh:/relay.sh:ro
