@@ -2,7 +2,7 @@ from os import getenv
 from pathlib import Path
 from signal import SIGKILL
 from subprocess import DEVNULL, Popen
-from typing import Optional
+from typing import Any, Optional
 
 import yaml
 from wyzebridge.auth import redact_password
@@ -240,7 +240,7 @@ def generate_certificates(cert_path):
 WEAK_STREAM_PASSWORDS = {"wyze", "change_me", "changeme", "password", "admin"}
 
 
-def parse_auth(auth: str, action: str = "read") -> list[dict[str, str]]:
+def parse_auth(auth: str, action: str = "read") -> list[dict[str, Any]]:
     """Parse `user:pass[:ip,ip][@path,path]|...` into MediaMTX authInternalUsers.
 
     action="read" is STREAM_AUTH (viewers); action="publish" is STREAM_PUBLISH_AUTH,
@@ -253,6 +253,14 @@ def parse_auth(auth: str, action: str = "read") -> list[dict[str, str]]:
         if ":" not in creds:
             continue
         user, password, *ips = creds.split(":", 2)
+        if action == "publish" and not (user and password):
+            # A publish login lets its holder replace a camera's video, so never
+            # create one without both a username and a password.
+            logger.warning(
+                f"[MTX] ⚠️ Skipping {env} entry '{user or '(no user)'}': "
+                "publish logins need both a username and a password."
+            )
+            continue
         if password.lower() in WEAK_STREAM_PASSWORDS or len(password) < 8:
             logger.warning(
                 f"[MTX] ⚠️ {env} password for '{user or 'any'}' is a known default or "
