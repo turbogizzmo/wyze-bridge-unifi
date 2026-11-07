@@ -111,6 +111,7 @@ services:
 - Web UI: HTTP Basic auth as `WB_USERNAME` (default `wbadmin`) / `WB_PASSWORD`.
 - API: send the key as an `api` header or `?api=` query parameter. It works for `/api`, `/img`, `/snapshot`, `/thumb`, `/photo` and `/signaling`.
 - With `WB_AUTH=true` MediaMTX also accepts `wb` / `<WB_API>` for RTSP/HLS/WebRTC, in addition to any `STREAM_AUTH` pairs.
+- All of those logins can only *watch*. Only clients on `127.0.0.1` inside the bridge's network can *publish* into a camera path without a password. To let a relay elsewhere publish (for example the [go2rtc-kvs](go2rtc-kvs/README.md) relay on Docker Desktop or on another host), set `STREAM_PUBLISH_AUTH=user:pass`. It uses the same format as `STREAM_AUTH` (`user:pass[:ip,ip][@cam,cam]`, several entries separated by `|`), but those logins can only publish, not watch, and they are not accepted for ONVIF. Each entry needs both a username and a password; entries missing either are skipped with a warning.
 
 If `WB_PASSWORD` or `WB_API` is not set, the bridge generates a random value on first start and saves it to `/tokens/wb_password` / `/tokens/wb_api` (mode 0600). Read them with `docker exec wyze-bridge cat /tokens/wb_password /tokens/wb_api`. Mount `/tokens` (as above) or set both explicitly (env vars or Docker secrets) so they survive container re-creation.
 

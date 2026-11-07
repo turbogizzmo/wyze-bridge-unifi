@@ -101,3 +101,4 @@ def redact_password(password: Optional[str]):
 
 
 STREAM_AUTH: str = env_bool("STREAM_AUTH", style="original")
+STREAM_PUBLISH_AUTH: str = env_bool("STREAM_PUBLISH_AUTH", style="original")

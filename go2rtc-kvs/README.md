@@ -41,7 +41,8 @@ The relay republishes go2rtc's stream into the bridge's **existing** MediaMTX pa
   MediaMTX RTSP on `:8554`, and (for Protect) the ONVIF server on `:8000`.
 - The bridge's API key, `WB_API`. With `WB_AUTH=true` (the default) `/signaling` needs it.
   Set `WB_API` explicitly on the bridge (e.g. `openssl rand -hex 24`) so it doesn't change.
-- Docker + Docker Compose on the same host as the bridge.
+- Docker + Docker Compose on the same host as the bridge, on **Linux** (host networking).
+  On macOS or Windows Docker Desktop, read [Docker Desktop](#docker-desktop-macos--windows) first.
 
 ## Deploy
 
@@ -82,6 +83,31 @@ The relay republishes go2rtc's stream into the bridge's **existing** MediaMTX pa
    In Protect the camera should start showing video within a retry cycle. If it was
    never adopted, adopt it now via ONVIF as usual (see the repo's main README).
 
+## Docker Desktop (macOS / Windows)
+
+The shipped [`docker-compose.yml`](docker-compose.yml) uses `network_mode: host` so the relay
+can reach the bridge on `127.0.0.1`. On Docker Desktop, "host" is Docker's Linux VM, not your
+Mac or PC, and host networking is off by default. If the containers end up on a normal Docker
+network, the relay reaches the bridge from another IP, and the bridge rejects it with
+`ANNOUNCE failed: 401 Unauthorized`.
+
+The simplest fix is to run go2rtc and the relay **inside the bridge container's network**.
+Then `127.0.0.1` means the bridge, and the files work unchanged. In `docker-compose.yml`,
+replace `network_mode: host` on **both** services with:
+
+```yaml
+    network_mode: "container:wyze-bridge"   # the bridge's container_name
+```
+
+Start the bridge first. If you re-create the bridge container, re-create these two as well
+(`docker compose up -d --force-recreate`). Don't add `ports:` for go2rtc. Its RTSP output and UI
+have no authentication and should stay on loopback.
+
+If you can't share the bridge's network (for example, the relay runs on another machine), use a
+publish login instead: set `STREAM_PUBLISH_AUTH=relay:<strong password>` on the bridge, and on
+the relay set `MTX: "rtsp://relay:<strong password>@<BRIDGE_IP>:8554"`. Keep go2rtc next to the
+relay so the relay can still read it on `127.0.0.1`.
+
 ## Security notes
 - go2rtc's API/UI (`:1984`) and RTSP (`:8561`) have no authentication of their own, so
   [`go2rtc.yaml`](go2rtc.yaml) binds them to `127.0.0.1`. Earlier versions of this stack
@@ -108,10 +134,18 @@ Then use it as a go2rtc/WebRTC camera source. The bridge add-on itself needs no 
 - **`ffprobe` on `:8561` (go2rtc) works but `:8554` (bridge) is empty** — the relay isn't
   publishing. Check `docker logs wyze-kvs-relay`; confirm `CAMERAS` matches the go2rtc
   stream names exactly.
-- **Publish rejected / 401 on `:8554`** — your MediaMTX auth doesn't allow the localhost
-  publisher. Ensure the bridge's default localhost-publish is intact, or set
-  `MTX: "rtsp://<user>:<pass>@127.0.0.1:8554"` in the compose (use a `STREAM_AUTH` pair
-  that has publish permission).
+- **`ANNOUNCE failed: 401 Unauthorized` / "authentication error" on `:8554`** — the bridge
+  only lets a client publish without a password when it connects from `127.0.0.1` in the
+  bridge's own network. The relay isn't connecting from there, usually because it's on a
+  Docker bridge network (Docker Desktop, or a compose file without `network_mode: host`)
+  or on another host. `STREAM_AUTH` and `wb:<WB_API>` logins can't fix this: they are
+  read-only. Either run the relay in the bridge's network (see
+  [Docker Desktop](#docker-desktop-macos--windows)), or give it a publish login: set
+  `STREAM_PUBLISH_AUTH=relay:<strong password>` on the **bridge**, restart it, and set
+  `MTX: "rtsp://relay:<strong password>@<BRIDGE_IP>:8554"` on the relay.
+- **Bridge settings like `authInternalUsers` seem to be ignored** — the bridge regenerates
+  MediaMTX's auth list every time it starts, so editing `mediamtx.yml` by hand has no effect.
+  Use `WB_AUTH`, `STREAM_AUTH` and `STREAM_PUBLISH_AUTH` instead.
 - **go2rtc gets no media** — open the go2rtc UI, check the stream. It listens on
   `127.0.0.1:1984` only, so open it on the host or through an SSH tunnel
   (`ssh -L 1984:127.0.0.1:1984 <host>`, then `http://127.0.0.1:1984`). Confirm
