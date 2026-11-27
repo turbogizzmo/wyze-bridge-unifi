@@ -279,7 +279,14 @@ def get_cam_webrtc(auth_info: WyzeCredential, mac_id: str) -> dict:
         f"https://webrtc.api.wyze.com/signaling/device/{mac_id}?use_trickle=true",
         headers=ui_headers,
     )
-    resp_json = validate_resp(resp)
+    try:
+        resp_json = validate_resp(resp)
+    except WyzeAPIError as ex:
+        # The webrtc API answers an expired access token with code 2, not the
+        # usual 2001, so the bridge's token refresh never fired for it.
+        if ex.code == "2":
+            raise AccessTokenError() from ex
+        raise
     for s in resp_json["results"]["servers"]:
         if "url" in s:
             s["urls"] = s.pop("url")
